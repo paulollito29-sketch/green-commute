@@ -1,0 +1,71 @@
+<div class="h-full w-full overflow-hidden font-sans bg-[#060913] text-slate-100 relative">
+  
+  <!-- Map Canvas -->
+  <main class="absolute inset-0 w-full h-full z-0">
+    <app-map-view 
+      [routes]="routes()" 
+      [selectedRouteId]="selectedRouteId()"
+      (routeSelected)="selectedRouteId.set($event)"
+      (destinationPinned)="onDestinationPinned($event)">
+    </app-map-view>
+
+    <app-nav-hud *ngIf="isNavigating()"></app-nav-hud>
+  </main>
+
+  <!-- Top Floating Header -->
+  <header class="fixed top-3 left-3 right-3 md:top-4 md:left-6 md:right-6 z-40 flex items-center justify-between pointer-events-none">
+    <div class="flex items-center space-x-2 bg-slate-950/90 backdrop-blur-xl px-3 py-1.5 rounded-2xl border border-white/10 shadow-xl pointer-events-auto">
+      <div class="w-7 h-7 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-400 flex items-center justify-center text-white text-sm font-black">🌱</div>
+      <h1 class="text-xs font-extrabold text-white">EcoCommute <span class="text-[8px] px-1 py-0.2 rounded-md bg-emerald-500/10 text-emerald-400 font-bold">ANGULAR</span></h1>
+    </div>
+
+    <div class="flex items-center space-x-2 pointer-events-auto">
+      <div *ngIf="user()" class="flex items-center space-x-1.5 bg-slate-950/90 px-3 py-1.5 rounded-2xl border border-white/10 text-xs">
+        <span>👤 {{ user()?.fullName }}</span>
+        <span class="text-amber-400 font-bold">{{ user()?.points }} pts</span>
+      </div>
+      <button *ngIf="!user()" (click)="showAuthModal.set(true)" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold py-1.5 px-3 rounded-2xl shadow-lg">
+        Ingresar
+      </button>
+    </div>
+  </header>
+
+  <!-- Mobile-First Bottom Sheet / Desktop Floating Panel -->
+  <aside class="fixed bottom-0 left-0 right-0 z-30 md:bottom-6 md:left-6 md:right-auto md:w-[420px] md:max-h-[calc(100vh-100px)] md:top-20 bg-[#090d1a]/95 backdrop-blur-2xl rounded-t-3xl md:rounded-3xl border-t md:border border-white/10 shadow-2xl flex flex-col max-h-[82vh] overflow-hidden">
+    
+    <!-- Navigation Tabs -->
+    <nav class="flex items-center justify-around border-b border-white/5 px-2 py-1 bg-slate-950/40 shrink-0">
+      <button (click)="activeTab.set('routes')" [class.text-emerald-400]="activeTab() === 'routes'" class="py-1.5 px-3 rounded-xl text-xs font-bold transition flex items-center space-x-1">
+        <span>🗺️</span><span>Rutas</span>
+      </button>
+      <button (click)="activeTab.set('dashboard')" [class.text-emerald-400]="activeTab() === 'dashboard'" class="py-1.5 px-3 rounded-xl text-xs font-semibold text-slate-400 hover:text-white transition flex items-center space-x-1">
+        <span>📊</span><span>Impacto</span>
+      </button>
+      <button (click)="activeTab.set('leaderboard')" [class.text-emerald-400]="activeTab() === 'leaderboard'" class="py-1.5 px-3 rounded-xl text-xs font-semibold text-slate-400 hover:text-white transition flex items-center space-x-1">
+        <span>🏆</span><span>Ranking</span>
+      </button>
+      <button *ngIf="isAdmin()" (click)="activeTab.set('admin')" [class.text-purple-400]="activeTab() === 'admin'" class="py-1.5 px-3 rounded-xl text-xs font-semibold text-purple-400 hover:text-purple-300 transition flex items-center space-x-1">
+        <span>🛡️</span><span>Admin</span>
+      </button>
+    </nav>
+
+    <!-- Tab Contents -->
+    <div class="flex-1 p-3 overflow-y-auto">
+      <app-route-planner 
+        *ngIf="activeTab() === 'routes'"
+        [routes]="routes()"
+        [selectedRouteId]="selectedRouteId()"
+        (modeChanged)="onModeChanged($event)"
+        (selectRoute)="selectedRouteId.set($event)"
+        (startTrip)="startNavigation()">
+      </app-route-planner>
+
+      <app-dashboard *ngIf="activeTab() === 'dashboard'"></app-dashboard>
+      <app-leaderboard *ngIf="activeTab() === 'leaderboard'"></app-leaderboard>
+      <app-admin-panel *ngIf="activeTab() === 'admin'"></app-admin-panel>
+    </div>
+  </aside>
+
+  <!-- Auth Modal -->
+  <app-auth-modal *ngIf="showAuthModal()" (close)="showAuthModal.set(false)"></app-auth-modal>
+</div>

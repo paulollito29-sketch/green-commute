@@ -1,0 +1,7 @@
+.git
+.gitignore
+.idea
+*.log
+backend/target/
+apache-maven-*/
+node_modules/
