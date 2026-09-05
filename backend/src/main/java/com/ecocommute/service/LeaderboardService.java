@@ -1,13 +1,14 @@
 package com.ecocommute.service;
 
 import com.ecocommute.entity.UserStats;
-import com.ecocommute.dto.dashboard.LeaderboardEntryDTO;
 import com.ecocommute.repository.UserStatsRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @Service
 public class LeaderboardService {
@@ -19,25 +20,21 @@ public class LeaderboardService {
     }
 
     @Transactional(readOnly = true)
-    public List<LeaderboardEntryDTO> getLeaderboard() {
+    public List<Map<String, Object>> getLeaderboard() {
         List<UserStats> topStats = userStatsRepository.findTopEcoUsers();
-        List<LeaderboardEntryDTO> result = new ArrayList<>();
+        List<Map<String, Object>> result = new ArrayList<>();
 
         int rank = 1;
-        for (UserStats stats : topStats) {
-            result.add(new LeaderboardEntryDTO(
-                    rank++,
-                    stats.getUser().getId(),
-                    stats.getUser().getFullName(),
-                    stats.getUser().getAvatarUrl(),
-                    stats.getUser().getCurrentPoints(),
-                    Math.round(stats.getTotalCo2SavedKg() * 10.0) / 10.0,
-                    stats.getTotalTrips(),
-                    stats.getUser().getStreakDays(),
-                    stats.getUser().getCurrentLevel()
-            ));
+        for (UserStats s : topStats) {
+            Map<String, Object> entry = new HashMap<>();
+            entry.put("userId", s.getUser().getId());
+            entry.put("fullName", s.getUser().getFullName());
+            entry.put("avatarUrl", s.getUser().getAvatarUrl());
+            entry.put("totalCo2SavedKg", s.getTotalCo2SavedKg());
+            entry.put("currentPoints", s.getUser().getCurrentPoints());
+            entry.put("rank", rank++);
+            result.add(entry);
         }
-
         return result;
     }
 }

@@ -1,8 +1,6 @@
 package com.ecocommute.service;
 
 import com.ecocommute.entity.*;
-import com.ecocommute.dto.trip.TripCreateRequest;
-import com.ecocommute.dto.trip.TripDTO;
 import com.ecocommute.repository.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -23,14 +21,19 @@ class FraudDetectionAndAdminTest {
 
     @Mock
     private TripRepository tripRepository;
+
     @Mock
     private UserRepository userRepository;
+
     @Mock
     private UserStatsRepository userStatsRepository;
+
     @Mock
     private BadgeRepository badgeRepository;
+
     @Mock
     private UserBadgeRepository userBadgeRepository;
+
     @Mock
     private CarbonEmissionService carbonEmissionService;
 
@@ -49,36 +52,33 @@ class FraudDetectionAndAdminTest {
     }
 
     @Test
-    @DisplayName("Debe detectar y marcar como sospechoso un viaje a pie con velocidad imposible (> 12 km/h)")
-    void testFraudDetectionWalkingSpeedAnomaly() {
-        User user = new User("trampa@ecocommute.org", "pass", "Usuario Trampa", Role.ROLE_USER);
+    @DisplayName("Debe marcar viaje como sospechoso si velocidad de caminata supera umbral (e.g. 15 km en 10 min = 90 km/h)")
+    void testSuspiciousWalkingSpeed() {
+        User user = new User();
         user.setId("u-123");
+        user.setEmail("fraud@ecocommute.org");
+        user.setFullName("User Fraud");
 
         when(userRepository.findById("u-123")).thenReturn(Optional.of(user));
-        when(carbonEmissionService.calculateBaselineEmissionGrams(anyDouble())).thenReturn(2000.0);
-        when(carbonEmissionService.calculateModeEmissionGrams(any(), anyDouble())).thenReturn(0.0);
-        when(carbonEmissionService.calculateCo2SavedGrams(any(), anyDouble())).thenReturn(2000.0);
-        when(carbonEmissionService.calculateCaloriesBurned(any(), anyDouble())).thenReturn(400);
-        when(carbonEmissionService.calculatePoints(any(), anyDouble(), anyInt())).thenReturn(50);
+        when(carbonEmissionService.calculateBaselineEmissionGrams(15.0)).thenReturn(2550.0);
+        when(carbonEmissionService.calculateModeEmissionGrams(TransportMode.WALKING, 15.0)).thenReturn(0.0);
+        when(carbonEmissionService.calculateCo2SavedGrams(TransportMode.WALKING, 15.0)).thenReturn(2550.0);
+        when(carbonEmissionService.calculateCaloriesBurned(TransportMode.WALKING, 15.0)).thenReturn(750);
+        when(carbonEmissionService.calculatePoints(eq(TransportMode.WALKING), anyDouble(), anyInt())).thenReturn(255);
         when(userStatsRepository.findByUserId("u-123")).thenReturn(Optional.of(new UserStats(user)));
         when(badgeRepository.findAll()).thenReturn(Collections.emptyList());
 
-        when(tripRepository.save(any(Trip.class))).thenAnswer(inv -> {
-            Trip t = inv.getArgument(0);
-            t.setId("trip-fraud-1");
-            return t;
-        });
+        when(tripRepository.save(any(Trip.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        // 10 km walking in 10 minutes = 60 km/h (Physically impossible walking)
-        TripCreateRequest req = new TripCreateRequest(
-                TransportMode.WALKING, "Origen", -12.0, -77.0, "Destino", -12.1, -77.1, 10.0, 10
-        );
+        Trip tripInput = new Trip();
+        tripInput.setTransportMode(TransportMode.WALKING);
+        tripInput.setDistanceKm(15.0);
+        tripInput.setDurationMinutes(10); // 90 km/h
 
-        TripDTO recorded = gamificationService.recordTrip("u-123", req);
+        Trip result = gamificationService.recordTrip("u-123", tripInput);
 
-        assertNotNull(recorded);
-        assertTrue(recorded.suspicious(), "El viaje debe ser marcado como sospechoso por el motor anti-fraude");
-        assertNotNull(recorded.suspiciousReason());
-        assertTrue(recorded.suspiciousReason().contains("Velocidad anormal"));
+        assertTrue(result.isSuspicious(), "El viaje debe marcarse como sospechoso");
+        assertNotNull(result.getSuspiciousReason());
+        assertTrue(result.getSuspiciousReason().contains("Velocidad anormal"));
     }
 }

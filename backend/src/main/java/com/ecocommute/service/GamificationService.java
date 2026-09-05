@@ -1,8 +1,6 @@
 package com.ecocommute.service;
 
 import com.ecocommute.entity.*;
-import com.ecocommute.dto.trip.TripCreateRequest;
-import com.ecocommute.dto.trip.TripDTO;
 import com.ecocommute.repository.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -36,45 +34,48 @@ public class GamificationService {
     }
 
     @Transactional
-    public TripDTO recordTrip(String userId, TripCreateRequest request) {
+    public Trip recordTrip(String userId, Trip tripData) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new IllegalArgumentException("Usuario no encontrado"));
 
-        double baselineCo2 = carbonEmissionService.calculateBaselineEmissionGrams(request.distanceKm());
-        double emittedCo2 = carbonEmissionService.calculateModeEmissionGrams(request.transportMode(), request.distanceKm());
-        double savedCo2 = carbonEmissionService.calculateCo2SavedGrams(request.transportMode(), request.distanceKm());
-        int calories = carbonEmissionService.calculateCaloriesBurned(request.transportMode(), request.distanceKm());
+        double distanceKm = tripData.getDistanceKm();
+        TransportMode mode = tripData.getTransportMode() != null ? tripData.getTransportMode() : TransportMode.BICYCLE;
+
+        double baselineCo2 = carbonEmissionService.calculateBaselineEmissionGrams(distanceKm);
+        double emittedCo2 = carbonEmissionService.calculateModeEmissionGrams(mode, distanceKm);
+        double savedCo2 = carbonEmissionService.calculateCo2SavedGrams(mode, distanceKm);
+        int calories = carbonEmissionService.calculateCaloriesBurned(mode, distanceKm);
 
         // Update Streak
         updateUserStreak(user);
 
-        int points = carbonEmissionService.calculatePoints(request.transportMode(), savedCo2, user.getStreakDays());
+        int points = carbonEmissionService.calculatePoints(mode, savedCo2, user.getStreakDays());
 
-        // Fraud & Suspicious Activity Detection
-        double durationHours = Math.max(0.01, request.durationMinutes() / 60.0);
-        double speedKmh = request.distanceKm() / durationHours;
+        // Fraud Detection
+        int durationMinutes = Math.max(1, tripData.getDurationMinutes());
+        double speedKmh = distanceKm / (durationMinutes / 60.0);
         boolean isSuspicious = false;
         String suspiciousReason = null;
 
-        if (request.transportMode() == TransportMode.WALKING && speedKmh > 12.0) {
+        if (mode == TransportMode.WALKING && speedKmh > 12.0) {
             isSuspicious = true;
             suspiciousReason = String.format("Velocidad anormal para caminata: %.1f km/h", speedKmh);
-        } else if (request.transportMode() == TransportMode.BICYCLE && speedKmh > 50.0) {
+        } else if (mode == TransportMode.BICYCLE && speedKmh > 50.0) {
             isSuspicious = true;
             suspiciousReason = String.format("Velocidad anormal para bicicleta: %.1f km/h", speedKmh);
         }
 
         Trip trip = new Trip();
         trip.setUser(user);
-        trip.setTransportMode(request.transportMode());
-        trip.setOriginName(request.originName() != null ? request.originName() : "Punto de Partida");
-        trip.setOriginLat(request.originLat());
-        trip.setOriginLng(request.originLng());
-        trip.setDestinationName(request.destinationName() != null ? request.destinationName() : "Destino");
-        trip.setDestinationLat(request.destinationLat());
-        trip.setDestinationLng(request.destinationLng());
-        trip.setDistanceKm(request.distanceKm());
-        trip.setDurationMinutes(request.durationMinutes());
+        trip.setTransportMode(mode);
+        trip.setOriginName(tripData.getOriginName() != null ? tripData.getOriginName() : "Punto de Partida");
+        trip.setOriginLat(tripData.getOriginLat());
+        trip.setOriginLng(tripData.getOriginLng());
+        trip.setDestinationName(tripData.getDestinationName() != null ? tripData.getDestinationName() : "Destino");
+        trip.setDestinationLat(tripData.getDestinationLat());
+        trip.setDestinationLng(tripData.getDestinationLng());
+        trip.setDistanceKm(distanceKm);
+        trip.setDurationMinutes(durationMinutes);
         trip.setBaselineCo2Grams(baselineCo2);
         trip.setCo2EmittedGrams(emittedCo2);
         trip.setCo2SavedGrams(savedCo2);
@@ -95,7 +96,7 @@ public class GamificationService {
         UserStats stats = userStatsRepository.findByUserId(userId)
                 .orElseGet(() -> new UserStats(user));
         stats.setTotalCo2SavedKg(stats.getTotalCo2SavedKg() + (savedCo2 / 1000.0));
-        stats.setTotalDistanceKm(stats.getTotalDistanceKm() + request.distanceKm());
+        stats.setTotalDistanceKm(stats.getTotalDistanceKm() + distanceKm);
         stats.setTotalTrips(stats.getTotalTrips() + 1);
         stats.setTotalCaloriesBurned(stats.getTotalCaloriesBurned() + calories);
         stats.setUpdatedAt(LocalDateTime.now());
@@ -104,7 +105,7 @@ public class GamificationService {
         // Check & Unlock Badges
         checkAndAwardBadges(user, stats);
 
-        return toTripDTO(trip);
+        return trip;
     }
 
     private void updateUserStreak(User user) {
@@ -117,18 +118,18 @@ public class GamificationService {
             if (lastTripDay.equals(today.minusDays(1))) {
                 user.setStreakDays(user.getStreakDays() + 1);
             } else if (!lastTripDay.equals(today)) {
-                user.setStreakDays(1); // Reset streak if missed a day
+                user.setStreakDays(1);
             }
         }
     }
 
     private int calculateLevel(int points) {
-        if (points < 100) return 1; // Semilla Verde
-        if (points < 300) return 2; // Brote Urbano
-        if (points < 700) return 3; // Árbol Sostenible
-        if (points < 1500) return 4; // Guardián del Aire
-        if (points < 3000) return 5; // Héroe Climático
-        return 6; // Maestro del Ecosistema
+        if (points < 100) return 1;
+        if (points < 300) return 2;
+        if (points < 700) return 3;
+        if (points < 1500) return 4;
+        if (points < 3000) return 5;
+        return 6;
     }
 
     private void checkAndAwardBadges(User user, UserStats stats) {
@@ -147,31 +148,5 @@ public class GamificationService {
                 }
             }
         }
-    }
-
-    private TripDTO toTripDTO(Trip trip) {
-        return new TripDTO(
-                trip.getId(),
-                trip.getUser().getId(),
-                trip.getUser().getFullName(),
-                trip.getTransportMode(),
-                trip.getTransportMode().getDisplayName(),
-                trip.getOriginName(),
-                trip.getOriginLat(),
-                trip.getOriginLng(),
-                trip.getDestinationName(),
-                trip.getDestinationLat(),
-                trip.getDestinationLng(),
-                trip.getDistanceKm(),
-                trip.getDurationMinutes(),
-                trip.getBaselineCo2Grams(),
-                trip.getCo2EmittedGrams(),
-                trip.getCo2SavedGrams(),
-                trip.getCaloriesBurned(),
-                trip.getPointsEarned(),
-                trip.isSuspicious(),
-                trip.getSuspiciousReason(),
-                trip.getCompletedAt()
-        );
     }
 }

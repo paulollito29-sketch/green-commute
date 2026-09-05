@@ -1,6 +1,5 @@
 package com.ecocommute.service;
 
-import com.ecocommute.dto.navigation.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -27,174 +26,117 @@ public class EcoRoutingService {
         this.restClient = RestClient.builder().requestFactory(factory).build();
     }
 
-    public EcoRouteResponse calculateInitialEcoRoute(EcoRouteRequest request) {
+    public Map<String, Object> calculateInitialEcoRoute(Map<String, Object> request) {
         UUID tripId = UUID.randomUUID();
-        return computeRoute(
-                tripId,
-                request.originLat(), request.originLng(),
-                request.destinationLat(), request.destinationLng(),
-                request.vehicleMode(),
-                0.0, 0.0
-        );
+        double originLat = ((Number) request.get("originLat")).doubleValue();
+        double originLng = ((Number) request.get("originLng")).doubleValue();
+        double destLat = ((Number) request.get("destinationLat")).doubleValue();
+        double destLng = ((Number) request.get("destinationLng")).doubleValue();
+        String vehicleMode = (String) request.get("vehicleMode");
+
+        return computeRoute(tripId, originLat, originLng, destLat, destLng, vehicleMode, 0.0, 0.0);
     }
 
-    public EcoRouteResponse recalculateRoute(RecalculateRouteRequest request) {
-        log.info("Recalculando ruta por desvío off-route para viaje {} desde ({}, {})", 
-                request.tripId(), request.currentLat(), request.currentLng());
-        
-        return computeRoute(
-                request.tripId(),
-                request.currentLat(), request.currentLng(),
-                request.destinationLat(), request.destinationLng(),
-                request.vehicleMode(),
-                request.accumulatedCo2SavedGrams(),
-                request.accumulatedDistanceKm()
-        );
+    public Map<String, Object> recalculateRoute(Map<String, Object> request) {
+        UUID tripId = request.get("tripId") != null ? UUID.fromString(request.get("tripId").toString()) : UUID.randomUUID();
+        double currentLat = ((Number) request.get("currentLat")).doubleValue();
+        double currentLng = ((Number) request.get("currentLng")).doubleValue();
+        double destLat = ((Number) request.get("destinationLat")).doubleValue();
+        double destLng = ((Number) request.get("destinationLng")).doubleValue();
+        String vehicleMode = (String) request.get("vehicleMode");
+        double accCo2 = request.get("accumulatedCo2SavedGrams") != null ? ((Number) request.get("accumulatedCo2SavedGrams")).doubleValue() : 0.0;
+        double accDist = request.get("accumulatedDistanceKm") != null ? ((Number) request.get("accumulatedDistanceKm")).doubleValue() : 0.0;
+
+        return computeRoute(tripId, currentLat, currentLng, destLat, destLng, vehicleMode, accCo2, accDist);
     }
 
-    public TelemetryTickResponse processTelemetryTick(TelemetryTickRequest tick) {
-        double distanceKm = tick.distanceIncrementMeters() / 1000.0;
-        
+    public Map<String, Object> processTelemetryTick(Map<String, Object> tick) {
+        double distIncrement = ((Number) tick.get("distanceIncrementMeters")).doubleValue();
+        double distanceKm = distIncrement / 1000.0;
+        double speedKmh = ((Number) tick.get("speedKmh")).doubleValue();
+
         double baselineGrams = distanceKm * BASELINE_CAR_EMISSION_PER_KM;
-        double modeEmissionGrams = switch (tick.speedKmh() > 25 ? "DRIVING" : "BICYCLE") {
+        double modeEmissionGrams = switch (speedKmh > 25 ? "DRIVING" : "BICYCLE") {
             case "BICYCLE" -> distanceKm * BICYCLE_EMISSION_PER_KM;
             case "WALKING" -> distanceKm * WALKING_EMISSION_PER_KM;
             default -> distanceKm * ECO_DRIVING_EMISSION_PER_KM;
         };
 
-        double tickSavedGrams = Math.max(0, baselineGrams - modeEmissionGrams);
+        double deltaCo2Saved = Math.max(0.0, baselineGrams - modeEmissionGrams);
+        double accCo2 = tick.get("accumulatedCo2SavedGrams") != null ? ((Number) tick.get("accumulatedCo2SavedGrams")).doubleValue() : 0.0;
+        double totalCo2Saved = accCo2 + deltaCo2Saved;
 
-        return new TelemetryTickResponse(
-                true,
-                Math.round(tickSavedGrams * 100.0) / 100.0,
-                0.0,
-                false
-        );
+        double treesEquivalent = (totalCo2Saved / 1000.0) / 21.77;
+        double totalDist = (tick.get("accumulatedDistanceKm") != null ? ((Number) tick.get("accumulatedDistanceKm")).doubleValue() : 0.0) + distanceKm;
+        int ecoPointsEarned = (int) Math.round(totalCo2Saved / 15.0);
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("tripId", tick.get("tripId"));
+        response.put("deltaCo2SavedGrams", deltaCo2Saved);
+        response.put("totalCo2SavedGrams", totalCo2Saved);
+        response.put("treesEquivalent", treesEquivalent);
+        response.put("totalDistanceKm", totalDist);
+        response.put("currentSpeedKmh", speedKmh);
+        response.put("ecoPointsEarned", ecoPointsEarned);
+        response.put("nextManeuverDistanceMeters", 120.0);
+        response.put("voiceAnnouncementText", "Continúa por 120 metros.");
+        response.put("suggestedManeuver", "CONTINUE_STRAIGHT");
+        return response;
     }
 
-    private EcoRouteResponse computeRoute(UUID tripId, double lat1, double lng1, double lat2, double lng2, 
-                                         String mode, double prevSavedGrams, double prevDistKm) {
-        String safeMode = mode != null ? mode.toUpperCase() : "BICYCLE";
-        String profile = "WALKING".equalsIgnoreCase(safeMode) ? "foot" : "driving";
-        
-        List<List<Double>> coordinates = fetchOsrmGeometry(profile, lat1, lng1, lat2, lng2);
-        double distanceKm = calculateHaversineTotal(coordinates);
-        int durationSeconds = (int) Math.round((distanceKm / getAverageSpeedKmh(safeMode)) * 3600);
-
-        double baselineCo2 = distanceKm * BASELINE_CAR_EMISSION_PER_KM;
-        double ecoCo2 = switch (safeMode) {
-            case "BICYCLE", "WALKING" -> 0.0;
-            default -> distanceKm * ECO_DRIVING_EMISSION_PER_KM;
+    private Map<String, Object> computeRoute(UUID tripId, double lat1, double lon1, double lat2, double lon2,
+                                             String mode, double accSavedCo2, double accDistKm) {
+        String profile = switch (mode != null ? mode.toUpperCase() : "BICYCLE") {
+            case "WALKING", "FOOT" -> "foot";
+            case "DRIVING", "CAR" -> "driving";
+            default -> "bike";
         };
 
-        double estimatedSavedGrams = prevSavedGrams + Math.max(0, baselineCo2 - ecoCo2);
-        List<ManeuverStepDTO> maneuvers = generateTurnByTurnSteps(coordinates);
+        String url = String.format(Locale.US, "https://router.project-osrm.org/route/v1/%s/%.6f,%.6f;%.6f,%.6f?overview=full&geometries=geojson&steps=true",
+                profile.equals("bike") ? "driving" : profile, lon1, lat1, lon2, lat2);
 
-        return new EcoRouteResponse(
-                tripId,
-                safeMode,
-                Math.round((prevDistKm + distanceKm) * 10.0) / 10.0,
-                durationSeconds,
-                Math.round(baselineCo2 * 10.0) / 10.0,
-                Math.round(ecoCo2 * 10.0) / 10.0,
-                Math.round(estimatedSavedGrams * 10.0) / 10.0,
-                coordinates,
-                maneuvers,
-                "Ruta optimizada con 0% emisiones directas y paso por corredores de baja contaminación."
-        );
-    }
+        List<List<Double>> pathCoordinates = new ArrayList<>();
+        double remainingDistanceMeters = 1000.0;
+        int remainingDurationSeconds = 300;
 
-    private List<ManeuverStepDTO> generateTurnByTurnSteps(List<List<Double>> coords) {
-        List<ManeuverStepDTO> steps = new ArrayList<>();
-        if (coords.size() < 2) return steps;
-
-        steps.add(new ManeuverStepDTO("Inicia el recorrido en dirección a tu destino", "START", 100.0, 30, coords.get(0)));
-
-        for (int i = 1; i < coords.size() - 1; i += Math.max(1, coords.size() / 5)) {
-            List<Double> p1 = coords.get(i - 1);
-            List<Double> p2 = coords.get(i);
-            List<Double> p3 = coords.get(Math.min(coords.size() - 1, i + 1));
-
-            double b1 = calculateBearing(p1.get(0), p1.get(1), p2.get(0), p2.get(1));
-            double b2 = calculateBearing(p2.get(0), p2.get(1), p3.get(0), p3.get(1));
-            double diff = (b2 - b1 + 180) % 360 - 180;
-
-            String type = "CONTINUE";
-            String text = "Continúa recto por la vía";
-
-            if (diff > 35) {
-                type = "TURN_RIGHT";
-                text = "Gira a la derecha en la siguiente intersección";
-            } else if (diff < -35) {
-                type = "TURN_LEFT";
-                text = "Gira a la izquierda en la siguiente intersección";
-            }
-
-            steps.add(new ManeuverStepDTO(text, type, 250.0, 60, p2));
-        }
-
-        steps.add(new ManeuverStepDTO("Has llegado a tu destino", "ARRIVE", 0.0, 0, coords.get(coords.size() - 1)));
-        return steps;
-    }
-
-    private List<List<Double>> fetchOsrmGeometry(String profile, double lat1, double lng1, double lat2, double lng2) {
         try {
-            String url = String.format(Locale.US,
-                    "https://router.project-osrm.org/route/v1/%s/%.6f,%.6f;%.6f,%.6f?overview=full&geometries=geojson",
-                    profile, lng1, lat1, lng2, lat2);
-
-            Map<?, ?> response = restClient.get().uri(url).retrieve().body(Map.class);
-            if (response != null && "Ok".equalsIgnoreCase((String) response.get("code"))) {
-                List<?> routes = (List<?>) response.get("routes");
+            Map response = restClient.get().uri(url).retrieve().body(Map.class);
+            if (response != null && "Ok".equals(response.get("code"))) {
+                List routes = (List) response.get("routes");
                 if (routes != null && !routes.isEmpty()) {
-                    Map<?, ?> firstRoute = (Map<?, ?>) routes.get(0);
-                    Map<?, ?> geometry = (Map<?, ?>) firstRoute.get("geometry");
-                    List<?> rawCoords = (List<?>) geometry.get("coordinates");
+                    Map primary = (Map) routes.get(0);
+                    remainingDistanceMeters = ((Number) primary.get("distance")).doubleValue();
+                    remainingDurationSeconds = ((Number) primary.get("duration")).intValue();
 
-                    List<List<Double>> parsed = new ArrayList<>();
-                    for (Object ptObj : rawCoords) {
-                        List<?> pt = (List<?>) ptObj;
-                        parsed.add(List.of(((Number) pt.get(1)).doubleValue(), ((Number) pt.get(0)).doubleValue()));
+                    Map geometry = (Map) primary.get("geometry");
+                    List rawCoords = (List) geometry.get("coordinates");
+                    for (Object pt : rawCoords) {
+                        List c = (List) pt;
+                        pathCoordinates.add(List.of(((Number) c.get(1)).doubleValue(), ((Number) c.get(0)).doubleValue()));
                     }
-                    return parsed;
                 }
             }
         } catch (Exception e) {
-            log.warn("OSRM error, falling back to direct points: {}", e.getMessage());
+            log.warn("OSRM lookup error: {}", e.getMessage());
+            pathCoordinates.add(List.of(lat1, lon1));
+            pathCoordinates.add(List.of(lat2, lon2));
         }
-        return List.of(List.of(lat1, lng1), List.of(lat2, lng2));
-    }
 
-    private double getAverageSpeedKmh(String mode) {
-        return switch (mode != null ? mode.toUpperCase() : "BICYCLE") {
-            case "WALKING" -> 4.8;
-            case "BICYCLE" -> 16.5;
-            default -> 32.0;
-        };
-    }
+        double remainingKm = remainingDistanceMeters / 1000.0;
+        double baselineGrams = remainingKm * BASELINE_CAR_EMISSION_PER_KM;
+        double modeGrams = remainingKm * (mode != null && mode.equalsIgnoreCase("WALKING") ? WALKING_EMISSION_PER_KM : BICYCLE_EMISSION_PER_KM);
+        double remainingSaved = Math.max(0, baselineGrams - modeGrams);
 
-    private double calculateBearing(double lat1, double lon1, double lat2, double lon2) {
-        double dLon = Math.toRadians(lon2 - lon1);
-        double y = Math.sin(dLon) * Math.cos(Math.toRadians(lat2));
-        double x = Math.cos(Math.toRadians(lat1)) * Math.sin(Math.toRadians(lat2)) -
-                   Math.sin(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) * Math.cos(dLon);
-        return (Math.toDegrees(Math.atan2(y, x)) + 360) % 360;
-    }
-
-    private double calculateHaversineTotal(List<List<Double>> coords) {
-        double total = 0;
-        for (int i = 0; i < coords.size() - 1; i++) {
-            total += haversine(coords.get(i).get(0), coords.get(i).get(1), coords.get(i + 1).get(0), coords.get(i + 1).get(1));
-        }
-        return Math.max(0.1, total);
-    }
-
-    private double haversine(double lat1, double lon1, double lat2, double lon2) {
-        double dLat = Math.toRadians(lat2 - lat1);
-        double dLon = Math.toRadians(lon2 - lon1);
-        double a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-                   Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
-                   Math.sin(dLon/2) * Math.sin(dLon/2);
-        return 6371.0 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        Map<String, Object> result = new HashMap<>();
+        result.put("tripId", tripId);
+        result.put("remainingDistanceMeters", remainingDistanceMeters);
+        result.put("remainingDurationSeconds", remainingDurationSeconds);
+        result.put("totalEstimatedCo2SavedGrams", accSavedCo2 + remainingSaved);
+        result.put("polylineCoordinates", pathCoordinates);
+        result.put("currentInstruction", "Iniciando recorrido ecológico...");
+        result.put("turnDirection", "CONTINUE");
+        result.put("nextStreetName", "Vía Principal");
+        result.put("distanceToNextStepMeters", 150.0);
+        return result;
     }
 }

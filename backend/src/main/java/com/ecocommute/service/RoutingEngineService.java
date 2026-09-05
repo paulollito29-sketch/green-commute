@@ -1,7 +1,6 @@
 package com.ecocommute.service;
 
 import com.ecocommute.entity.TransportMode;
-import com.ecocommute.dto.route.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -33,23 +32,28 @@ public class RoutingEngineService {
                 .build();
     }
 
-    public RoutePlanResponse planRoutes(RoutePlanRequest request, int userStreakDays) {
-        CoordinatesDTO origin = request.origin();
-        CoordinatesDTO destination = request.destination();
-        String selectedProfile = request.selectedProfile() != null ? request.selectedProfile().toUpperCase() : "BICYCLE";
-        boolean enableAi = Boolean.TRUE.equals(request.enableAiOptimization());
+    public Map<String, Object> planRoutes(Map<String, Object> request, int userStreakDays) {
+        Map origin = (Map) request.get("origin");
+        Map destination = (Map) request.get("destination");
+        double originLat = ((Number) origin.get("latitude")).doubleValue();
+        double originLng = ((Number) origin.get("longitude")).doubleValue();
+        double destLat = ((Number) destination.get("latitude")).doubleValue();
+        double destLng = ((Number) destination.get("longitude")).doubleValue();
 
-        // 1. Fetch Driving Route with street alternatives (Respects one-way streets and real roads)
+        String selectedProfile = request.get("selectedProfile") != null ? request.get("selectedProfile").toString().toUpperCase() : "BICYCLE";
+        boolean enableAi = Boolean.TRUE.equals(request.get("enableAiOptimization"));
+
+        // 1. Fetch Driving Route with street alternatives
         List<OsrmRouteResult> drivingStreetRoutes = fetchOsrmStreetRoutes(
                 "driving",
-                origin.latitude(), origin.longitude(),
-                destination.latitude(), destination.longitude(),
+                originLat, originLng,
+                destLat, destLng,
                 true
         );
 
         OsrmRouteResult primaryDrivingRoute = !drivingStreetRoutes.isEmpty()
                 ? drivingStreetRoutes.get(0)
-                : createGeometricFallback(origin.latitude(), origin.longitude(), destination.latitude(), destination.longitude());
+                : createGeometricFallback(originLat, originLng, destLat, destLng);
 
         double baselineStreetDistanceKm = primaryDrivingRoute.distanceKm;
         int drivingDurationMinutes = primaryDrivingRoute.durationMinutes;
@@ -61,223 +65,217 @@ public class RoutingEngineService {
             default -> TransportMode.BICYCLE;
         };
 
-        // 2. Fetch specialized profile routes (foot / walking or driving)
-        List<OsrmRouteResult> modeStreetRoutes;
-        if (targetMode == TransportMode.WALKING) {
-            modeStreetRoutes = fetchOsrmStreetRoutes(
-                    "foot",
-                    origin.latitude(), origin.longitude(),
-                    destination.latitude(), destination.longitude(),
-                    true
-            );
-            if (modeStreetRoutes.isEmpty()) modeStreetRoutes = drivingStreetRoutes;
-        } else if (targetMode == TransportMode.BICYCLE) {
-            // For bicycle, try foot (pedestrian corridors/alleys) and driving (streets)
-            List<OsrmRouteResult> footRoutes = fetchOsrmStreetRoutes(
-                    "foot",
-                    origin.latitude(), origin.longitude(),
-                    destination.latitude(), destination.longitude(),
-                    true
-            );
-            modeStreetRoutes = !footRoutes.isEmpty() ? footRoutes : drivingStreetRoutes;
-        } else {
-            modeStreetRoutes = drivingStreetRoutes;
-        }
-
-        OsrmRouteResult standardRouteResult = !modeStreetRoutes.isEmpty()
-                ? modeStreetRoutes.get(0)
-                : primaryDrivingRoute;
-
-        // 3. For the AI Green Corridor Route: Pick genuine second real street alternative from OSRM if available,
-        // or the pedestrian/cycleway path. Never use artificial mathematical distortions.
-        OsrmRouteResult aiGreenRouteResult;
-        if (modeStreetRoutes.size() > 1) {
-            aiGreenRouteResult = modeStreetRoutes.get(1);
-        } else if (drivingStreetRoutes.size() > 1 && targetMode != TransportMode.WALKING) {
-            aiGreenRouteResult = drivingStreetRoutes.get(1);
-        } else {
-            aiGreenRouteResult = standardRouteResult;
-        }
-
-        // 1. Baseline Route (Driving Solo)
-        RouteOptionDTO baselineRoute = buildRouteOptionWithCoords(
+        // 2. Baseline Car Option
+        Map<String, Object> baselineCar = createRouteOption(
+                "route-baseline-car",
+                "🚗 Auto / Vehículo Convencional (Línea Base)",
                 TransportMode.CAR_SOLO,
                 baselineStreetDistanceKm,
                 drivingDurationMinutes,
-                false, null, userStreakDays,
-                primaryDrivingRoute.coordinates,
-                "Ruta Convencional (Línea Base)"
+                baselineCo2,
+                0.0,
+                0,
+                (int) Math.round(baselineStreetDistanceKm * TransportMode.CAR_SOLO.getCaloriesPerKm()),
+                false,
+                null,
+                primaryDrivingRoute.pathCoordinates,
+                "Ruta vehicular estándar directa por avenidas principales."
         );
 
-        // 2. Standard Route for Selected Mode
-        double stdDistance = standardRouteResult.distanceKm;
-        int stdDuration = calculateDurationForMode(targetMode, stdDistance, standardRouteResult.durationMinutes);
-        RouteOptionDTO standardSelectedRoute = buildRouteOptionWithCoords(
+        // 3. Active Mode Street Route
+        String osrmProfile = (targetMode == TransportMode.WALKING) ? "foot" : "driving";
+        List<OsrmRouteResult> activeModeRoutes = fetchOsrmStreetRoutes(
+                osrmProfile,
+                originLat, originLng,
+                destLat, destLng,
+                true
+        );
+
+        OsrmRouteResult standardActiveRoute = !activeModeRoutes.isEmpty()
+                ? activeModeRoutes.get(0)
+                : primaryDrivingRoute;
+
+        double standardDistanceKm = standardActiveRoute.distanceKm;
+        int standardDuration = (targetMode == TransportMode.BICYCLE)
+                ? (int) Math.max(3, Math.round((standardDistanceKm / 16.0) * 60))
+                : (targetMode == TransportMode.WALKING ? (int) Math.max(3, Math.round((standardDistanceKm / 4.8) * 60)) : standardActiveRoute.durationMinutes);
+
+        double standardEmitted = carbonEmissionService.calculateModeEmissionGrams(targetMode, standardDistanceKm);
+        double standardSaved = Math.max(0, baselineCo2 - standardEmitted);
+        int standardPoints = carbonEmissionService.calculatePoints(targetMode, standardSaved, userStreakDays);
+
+        Map<String, Object> standardOption = createRouteOption(
+                "route-standard-direct",
+                targetMode == TransportMode.BICYCLE ? "🚲 Bicicleta (Ruta Directa)" : (targetMode == TransportMode.WALKING ? "🚶 Caminata (Ruta Directa)" : "🚗 Vehículo Eficiente"),
                 targetMode,
-                stdDistance,
-                stdDuration,
-                false, null, userStreakDays,
-                standardRouteResult.coordinates,
-                "Ruta Estándar (" + targetMode.getDisplayName() + ")"
+                standardDistanceKm,
+                standardDuration,
+                standardEmitted,
+                standardSaved,
+                standardPoints,
+                (int) Math.round(standardDistanceKm * targetMode.getCaloriesPerKm()),
+                false,
+                null,
+                standardActiveRoute.pathCoordinates,
+                "Ruta directa sobre la red vial de la ciudad."
         );
 
-        // 3. AI Optimized Route (Real Street Green Corridor)
-        double aiDistance = aiGreenRouteResult.distanceKm;
-        int aiDuration = calculateDurationForMode(targetMode, aiDistance, aiGreenRouteResult.durationMinutes);
-
-        AiInsightDTO aiInsight = null;
-        if (enableAi) {
-            double aiCo2Saved = carbonEmissionService.calculateCo2SavedGrams(targetMode, aiDistance);
-            aiInsight = aiAdvisorService.generateRouteInsight(
-                    origin, destination, targetMode, aiDistance, aiCo2Saved, aiDuration,
-                    Boolean.TRUE.equals(request.hasBicycle())
-            );
+        // 4. AI Optimized Green Corridor
+        OsrmRouteResult greenStreetRoute;
+        if (activeModeRoutes.size() > 1) {
+            greenStreetRoute = activeModeRoutes.get(1);
+        } else if (drivingStreetRoutes.size() > 1) {
+            greenStreetRoute = drivingStreetRoutes.get(1);
         } else {
-            aiInsight = new AiInsightDTO(
-                    "Corredor Verde Optimizado con IA",
-                    "Ruta adaptada por calles arboladas, ciclovías y vías con menor exposición a material particulado.",
-                    "🌿 Corredor Verde",
-                    carbonEmissionService.calculateCaloriesBurned(targetMode, aiDistance),
-                    Math.round((carbonEmissionService.calculateCo2SavedGrams(targetMode, aiDistance) / 21000.0) * 1000.0) / 1000.0,
-                    "Flujo continuo y menor tráfico vehicular"
-            );
+            greenStreetRoute = standardActiveRoute;
         }
 
-        RouteOptionDTO aiSmartRoute = buildRouteOptionWithCoords(
+        double greenDistanceKm = greenStreetRoute.distanceKm;
+        int greenDuration = (targetMode == TransportMode.BICYCLE)
+                ? (int) Math.max(3, Math.round((greenDistanceKm / 15.5) * 60))
+                : (targetMode == TransportMode.WALKING ? (int) Math.max(3, Math.round((greenDistanceKm / 4.5) * 60)) : greenStreetRoute.durationMinutes);
+
+        double greenEmitted = carbonEmissionService.calculateModeEmissionGrams(targetMode, greenDistanceKm);
+        double greenSaved = Math.max(0, baselineCo2 - greenEmitted);
+        int greenPoints = carbonEmissionService.calculatePoints(targetMode, greenSaved, userStreakDays) + 10;
+
+        Map<String, Object> aiInsight = aiAdvisorService.generateRouteInsight(
+                originLat, originLng,
+                destLat, destLng,
                 targetMode,
-                aiDistance,
-                aiDuration,
+                greenDistanceKm,
+                greenSaved,
+                greenDuration,
+                true
+        );
+
+        Map<String, Object> greenOption = createRouteOption(
+                "route-ai-green-corridor",
+                "🌿 Corredor Verde Optimizado con IA",
+                targetMode,
+                greenDistanceKm,
+                greenDuration,
+                greenEmitted,
+                greenSaved,
+                greenPoints,
+                (int) Math.round(greenDistanceKm * targetMode.getCaloriesPerKm()),
                 true,
                 aiInsight,
-                userStreakDays,
-                aiGreenRouteResult.coordinates,
-                "Ruta Verde IA (" + targetMode.getDisplayName() + ")"
+                greenStreetRoute.pathCoordinates,
+                "Corredor seleccionado por menor exposición a tráfico y mejor infraestructura."
         );
 
-        List<RouteOptionDTO> allOptions = List.of(aiSmartRoute, standardSelectedRoute, baselineRoute);
+        Map<String, Object> result = new HashMap<>();
+        result.put("baselineCarRoute", baselineCar);
+        result.put("standardProfileRoute", standardOption);
+        result.put("aiGreenCorridorRoute", greenOption);
+        result.put("recommendedRouteId", "route-ai-green-corridor");
+        return result;
+    }
 
-        return new RoutePlanResponse(
-                origin,
-                destination,
-                Math.round(baselineCo2 * 10.0) / 10.0,
-                baselineRoute,
-                standardSelectedRoute,
-                aiSmartRoute,
-                allOptions
+    private List<OsrmRouteResult> fetchOsrmStreetRoutes(String profile, double lat1, double lon1, double lat2, double lon2, boolean requestAlternatives) {
+        String url = String.format(
+                Locale.US,
+                "https://router.project-osrm.org/route/v1/%s/%.6f,%.6f;%.6f,%.6f?overview=full&geometries=geojson&alternatives=%s",
+                profile, lon1, lat1, lon2, lat2, requestAlternatives ? "true" : "false"
         );
-    }
 
-    private int calculateDurationForMode(TransportMode mode, double distanceKm, int rawMinutes) {
-        return switch (mode) {
-            case WALKING -> (int) Math.max(3, Math.round((distanceKm / 4.5) * 60.0));
-            case BICYCLE -> (int) Math.max(3, Math.round((distanceKm / 16.0) * 60.0));
-            case CAR_SOLO -> Math.max(2, rawMinutes);
-        };
-    }
-
-    private RouteOptionDTO buildRouteOptionWithCoords(TransportMode mode,
-                                                     double distanceKm,
-                                                     int durationMinutes,
-                                                     boolean isAiRecommended,
-                                                     AiInsightDTO aiInsight,
-                                                     int userStreakDays,
-                                                     List<List<Double>> realStreetPolyline,
-                                                     String customTitle) {
-
-        double emitted = carbonEmissionService.calculateModeEmissionGrams(mode, distanceKm);
-        double saved = carbonEmissionService.calculateCo2SavedGrams(mode, distanceKm);
-        int points = carbonEmissionService.calculatePoints(mode, saved, userStreakDays);
-        int calories = carbonEmissionService.calculateCaloriesBurned(mode, distanceKm);
-
-        String summary = String.format("%.1f km • %d min • %s",
-                distanceKm, durationMinutes, customTitle);
-
-        return new RouteOptionDTO(
-                UUID.randomUUID().toString(),
-                customTitle,
-                mode,
-                mode.getDisplayName(),
-                Math.round(distanceKm * 10.0) / 10.0,
-                durationMinutes,
-                Math.round(emitted * 10.0) / 10.0,
-                Math.round(saved * 10.0) / 10.0,
-                points,
-                calories,
-                isAiRecommended,
-                aiInsight,
-                realStreetPolyline,
-                summary
-        );
-    }
-
-    private record OsrmRouteResult(double distanceKm, int durationMinutes, List<List<Double>> coordinates) {}
-
-    private List<OsrmRouteResult> fetchOsrmStreetRoutes(String profile, double lat1, double lng1, double lat2, double lng2, boolean requestAlternatives) {
-        List<OsrmRouteResult> results = new ArrayList<>();
         try {
-            String osrmUrl = String.format(Locale.US,
-                    "https://router.project-osrm.org/route/v1/%s/%.6f,%.6f;%.6f,%.6f?overview=full&geometries=geojson&alternatives=%s",
-                    profile, lng1, lat1, lng2, lat2, requestAlternatives ? "true" : "false");
-
-            Map<?, ?> response = restClient.get()
-                    .uri(osrmUrl)
+            Map response = restClient.get()
+                    .uri(url)
                     .retrieve()
                     .body(Map.class);
 
-            if (response != null && "Ok".equalsIgnoreCase((String) response.get("code"))) {
-                List<?> routes = (List<?>) response.get("routes");
-                if (routes != null) {
-                    for (Object rObj : routes) {
-                        Map<?, ?> rMap = (Map<?, ?>) rObj;
-                        double distanceMeters = ((Number) rMap.get("distance")).doubleValue();
-                        double durationSeconds = ((Number) rMap.get("duration")).doubleValue();
+            if (response != null && "Ok".equals(response.get("code"))) {
+                List routes = (List) response.get("routes");
+                if (routes != null && !routes.isEmpty()) {
+                    List<OsrmRouteResult> results = new ArrayList<>();
+                    for (Object routeObj : routes) {
+                        Map route = (Map) routeObj;
+                        double distanceMeters = ((Number) route.get("distance")).doubleValue();
+                        double durationSeconds = ((Number) route.get("duration")).doubleValue();
 
-                        Map<?, ?> geometry = (Map<?, ?>) rMap.get("geometry");
-                        List<?> rawCoords = (List<?>) geometry.get("coordinates");
+                        Map geometry = (Map) route.get("geometry");
+                        List rawCoords = (List) geometry.get("coordinates");
 
-                        List<List<Double>> parsedCoords = new ArrayList<>();
+                        List<List<Double>> path = new ArrayList<>();
                         for (Object coordObj : rawCoords) {
-                            List<?> pt = (List<?>) coordObj;
-                            double lon = ((Number) pt.get(0)).doubleValue();
-                            double lat = ((Number) pt.get(1)).doubleValue();
-                            parsedCoords.add(List.of(lat, lon));
+                            List coord = (List) coordObj;
+                            double lon = ((Number) coord.get(0)).doubleValue();
+                            double lat = ((Number) coord.get(1)).doubleValue();
+                            path.add(List.of(lat, lon));
                         }
 
-                        double distanceKm = Math.max(0.1, distanceMeters / 1000.0);
-                        int durationMinutes = (int) Math.max(1, Math.round(durationSeconds / 60.0));
-
-                        results.add(new OsrmRouteResult(distanceKm, durationMinutes, parsedCoords));
+                        results.add(new OsrmRouteResult(
+                                distanceMeters / 1000.0,
+                                (int) Math.ceil(durationSeconds / 60.0),
+                                path
+                        ));
                     }
+                    return results;
                 }
             }
         } catch (Exception e) {
-            log.warn("OSRM [{}] query failed: {}", profile, e.getMessage());
+            log.warn("OSRM query failed: {}", e.getMessage());
         }
-
-        return results;
+        return Collections.emptyList();
     }
 
-    private OsrmRouteResult createGeometricFallback(double lat1, double lng1, double lat2, double lng2) {
-        double direct = calculateHaversineDistance(lat1, lng1, lat2, lng2);
-        double fallbackDist = Math.max(0.4, direct * 1.25);
-        int fallbackDur = (int) Math.max(2, Math.round((fallbackDist / 20.0) * 60.0));
-
-        List<List<Double>> points = new ArrayList<>();
-        points.add(List.of(lat1, lng1));
-        points.add(List.of((lat1 + lat2) / 2.0, (lng1 + lng2) / 2.0));
-        points.add(List.of(lat2, lng2));
-
-        return new OsrmRouteResult(fallbackDist, fallbackDur, points);
-    }
-
-    public static double calculateHaversineDistance(double lat1, double lon1, double lat2, double lon2) {
-        final int R = 6371;
-        double latDistance = Math.toRadians(lat2 - lat1);
-        double lonDistance = Math.toRadians(lon2 - lon1);
-        double a = Math.sin(latDistance / 2) * Math.sin(latDistance / 2)
-                + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
-                * Math.sin(lonDistance / 2) * Math.sin(lonDistance / 2);
+    private OsrmRouteResult createGeometricFallback(double lat1, double lon1, double lat2, double lon2) {
+        double dLat = Math.toRadians(lat2 - lat1);
+        double dLon = Math.toRadians(lon2 - lon1);
+        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
+                        Math.sin(dLon / 2) * Math.sin(dLon / 2);
         double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return R * c;
+        double straightDistance = 6371.0 * c;
+        double streetDistance = straightDistance * 1.35;
+        int duration = (int) Math.round((streetDistance / 35.0) * 60);
+
+        List<List<Double>> path = List.of(
+                List.of(lat1, lon1),
+                List.of((lat1 + lat2) / 2, (lon1 + lon2) / 2),
+                List.of(lat2, lon2)
+        );
+
+        return new OsrmRouteResult(streetDistance, duration, path);
+    }
+
+    private Map<String, Object> createRouteOption(
+            String id, String title, TransportMode mode,
+            double distanceKm, int durationMinutes,
+            double co2Emitted, double co2Saved,
+            int points, int calories,
+            boolean isAi, Map<String, Object> aiInsight,
+            List<List<Double>> path, String summary) {
+
+        Map<String, Object> map = new HashMap<>();
+        map.put("id", id);
+        map.put("title", title);
+        map.put("mode", mode);
+        map.put("modeDisplayName", mode.getDisplayName());
+        map.put("distanceKm", Math.round(distanceKm * 100.0) / 100.0);
+        map.put("durationMinutes", durationMinutes);
+        map.put("co2EmittedGrams", Math.round(co2Emitted));
+        map.put("co2SavedGrams", Math.round(co2Saved));
+        map.put("potentialPoints", points);
+        map.put("caloriesBurned", calories);
+        map.put("isAiRecommended", isAi);
+        map.put("aiInsight", aiInsight);
+        map.put("pathCoordinates", path);
+        map.put("summary", summary);
+        return map;
+    }
+
+    private static class OsrmRouteResult {
+        final double distanceKm;
+        final int durationMinutes;
+        final List<List<Double>> pathCoordinates;
+
+        OsrmRouteResult(double distanceKm, int durationMinutes, List<List<Double>> pathCoordinates) {
+            this.distanceKm = distanceKm;
+            this.durationMinutes = durationMinutes;
+            this.pathCoordinates = pathCoordinates;
+        }
     }
 }

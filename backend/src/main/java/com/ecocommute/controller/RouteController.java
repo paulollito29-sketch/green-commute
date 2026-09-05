@@ -1,12 +1,11 @@
 package com.ecocommute.controller;
 
-import com.ecocommute.dto.navigation.*;
-import com.ecocommute.dto.route.RoutePlanRequest;
-import com.ecocommute.dto.route.RoutePlanResponse;
 import com.ecocommute.service.EcoRoutingService;
 import com.ecocommute.service.RoutingEngineService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.Map;
 
 @RestController
 @RequestMapping({"/api/v1", "/api"})
@@ -23,22 +22,22 @@ public class RouteController {
     }
 
     @PostMapping("/routes/plan")
-    public ResponseEntity<RoutePlanResponse> planRoutes(@RequestBody RoutePlanRequest request) {
+    public ResponseEntity<Map<String, Object>> planRoutes(@RequestBody Map<String, Object> request) {
         return ResponseEntity.ok(routingEngineService.planRoutes(request, 1));
     }
 
     @PostMapping("/routes/eco-route")
-    public ResponseEntity<EcoRouteResponse> getInitialEcoRoute(@RequestBody EcoRouteRequest request) {
+    public ResponseEntity<Map<String, Object>> getInitialEcoRoute(@RequestBody Map<String, Object> request) {
         return ResponseEntity.ok(ecoRoutingService.calculateInitialEcoRoute(request));
     }
 
     @PostMapping("/routes/recalculate")
-    public ResponseEntity<EcoRouteResponse> recalculateRoute(@RequestBody RecalculateRouteRequest request) {
+    public ResponseEntity<Map<String, Object>> recalculateRoute(@RequestBody Map<String, Object> request) {
         return ResponseEntity.ok(ecoRoutingService.recalculateRoute(request));
     }
 
     @PostMapping("/telemetry/tick")
-    public ResponseEntity<TelemetryTickResponse> recordTelemetryTick(@RequestBody TelemetryTickRequest request) {
+    public ResponseEntity<Map<String, Object>> recordTelemetryTick(@RequestBody Map<String, Object> request) {
         return ResponseEntity.ok(ecoRoutingService.processTelemetryTick(request));
     }
 }

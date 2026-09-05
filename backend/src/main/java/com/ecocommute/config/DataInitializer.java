@@ -1,7 +1,6 @@
 package com.ecocommute.config;
 
 import com.ecocommute.entity.*;
-import com.ecocommute.dto.trip.TripCreateRequest;
 import com.ecocommute.repository.*;
 import com.ecocommute.service.GamificationService;
 import org.slf4j.Logger;
@@ -73,73 +72,47 @@ public class DataInitializer implements CommandLineRunner {
 
     private void initUsersAndTrips() {
         if (userRepository.count() == 0) {
-            // 1. Admin User
             User admin = createUser("admin@ecocommute.org", "Admin123!", "Administrador EcoCommute", Role.ROLE_ADMIN, "admin", true);
-
-            // 2. Demo User (Elena Rios) - High engagement
             User elena = createUser("demo@ecocommute.org", "Demo123!", "Elena Rios", Role.ROLE_USER, "elena", true);
-
-            // 3. Mateo Silva - Leaderboard #1 Ciclista Top
             User mateo = createUser("mateo@ecocommute.org", "Mateo123!", "Mateo Silva", Role.ROLE_USER, "mateo", true);
-
-            // 4. Sofia Morales - Metro & Transit Expert
             User sofia = createUser("sofia@ecocommute.org", "Sofia123!", "Sofia Morales", Role.ROLE_USER, "sofia", false);
-
-            // 5. Carlos Mendoza - Multimodal
             User carlos = createUser("carlos@ecocommute.org", "Carlos123!", "Carlos Mendoza", Role.ROLE_USER, "carlos", true);
-
-            // 6. Lucía Vega - E-Bike commuter
             User lucia = createUser("lucia@ecocommute.org", "Lucia123!", "Lucía Vega", Role.ROLE_USER, "lucia", true);
-
-            // 7. Diego Torres - Suspicious User (for Admin Auditor demo)
             User diego = createUser("diego@ecocommute.org", "Diego123!", "Diego Torres", Role.ROLE_USER, "diego", false);
 
-            // Seed Elena Trips (Daily variety for beautiful charts)
-            gamificationService.recordTrip(elena.getId(), new TripCreateRequest(
-                    TransportMode.BICYCLE, "Casa (San Isidro)", -12.0897, -77.0543, "Centro Financiero", -12.0965, -77.0285, 8.5, 32
-            ));
-            gamificationService.recordTrip(elena.getId(), new TripCreateRequest(
-                    TransportMode.BICYCLE, "Parque Kennedy", -12.1215, -77.0298, "Café Verde Miraflores", -12.1280, -77.0310, 1.6, 6
-            ));
-            gamificationService.recordTrip(elena.getId(), new TripCreateRequest(
-                    TransportMode.WALKING, "Parque Kennedy", -12.1215, -77.0298, "Café Verde Miraflores", -12.1280, -77.0310, 1.6, 18
-            ));
-            gamificationService.recordTrip(elena.getId(), new TripCreateRequest(
-                    TransportMode.BICYCLE, "Av. Salaverry", -12.0850, -77.0450, "Malecón de la Reserva", -12.1310, -77.0290, 6.8, 20
-            ));
+            recordDemoTrip(elena.getId(), TransportMode.BICYCLE, "Casa (San Isidro)", -12.0897, -77.0543, "Centro Financiero", -12.0965, -77.0285, 8.5, 32);
+            recordDemoTrip(elena.getId(), TransportMode.BICYCLE, "Parque Kennedy", -12.1215, -77.0298, "Café Verde Miraflores", -12.1280, -77.0310, 1.6, 6);
+            recordDemoTrip(elena.getId(), TransportMode.WALKING, "Parque Kennedy", -12.1215, -77.0298, "Café Verde Miraflores", -12.1280, -77.0310, 1.6, 18);
+            recordDemoTrip(elena.getId(), TransportMode.BICYCLE, "Av. Salaverry", -12.0850, -77.0450, "Malecón de la Reserva", -12.1310, -77.0290, 6.8, 20);
 
-            // Seed Mateo Trips (High mileage cyclist)
             for (int i = 0; i < 6; i++) {
-                gamificationService.recordTrip(mateo.getId(), new TripCreateRequest(
-                        TransportMode.BICYCLE, "Residencial San Felipe", -12.0820, -77.0490, "Parque de la Exposición", -12.0590, -77.0360, 12.0, 42
-                ));
+                recordDemoTrip(mateo.getId(), TransportMode.BICYCLE, "Residencial San Felipe", -12.0820, -77.0490, "Parque de la Exposición", -12.0590, -77.0360, 12.0, 42);
             }
 
-            // Seed Sofia Trips
             for (int i = 0; i < 5; i++) {
-                gamificationService.recordTrip(sofia.getId(), new TripCreateRequest(
-                        TransportMode.BICYCLE, "Estación Los Jardines", -12.0150, -77.0050, "Estación Angamos", -12.1120, -77.0120, 14.5, 50
-                ));
+                recordDemoTrip(sofia.getId(), TransportMode.BICYCLE, "Estación Los Jardines", -12.0150, -77.0050, "Estación Angamos", -12.1120, -77.0120, 14.5, 50);
             }
 
-            // Seed Carlos Trips
-            gamificationService.recordTrip(carlos.getId(), new TripCreateRequest(
-                    TransportMode.WALKING, "Av. Arequipa", -12.0720, -77.0350, "Centro Histórico", -12.0450, -77.0310, 5.2, 55
-            ));
-            gamificationService.recordTrip(carlos.getId(), new TripCreateRequest(
-                    TransportMode.BICYCLE, "Surco", -12.1350, -77.0150, "San Borja Norte", -12.0910, -77.0020, 7.8, 26
-            ));
-
-            // Seed Lucia Trips
-            gamificationService.recordTrip(lucia.getId(), new TripCreateRequest(
-                    TransportMode.BICYCLE, "Barranco", -12.1480, -77.0210, "San Isidro Golf", -12.0950, -77.0420, 8.0, 28
-            ));
-
-            // Seed Diego Trips - Includes a SUSPICIOUS SPEED ANOMALY (e.g. 15 km walking in 10 min = 90 km/h)
-            gamificationService.recordTrip(diego.getId(), new TripCreateRequest(
-                    TransportMode.WALKING, "Av. Brasil", -12.0750, -77.0510, "Plaza Bolognesi", -12.0620, -77.0410, 15.0, 10
-            ));
+            recordDemoTrip(carlos.getId(), TransportMode.WALKING, "Av. Arequipa", -12.0720, -77.0350, "Centro Histórico", -12.0450, -77.0310, 5.2, 55);
+            recordDemoTrip(carlos.getId(), TransportMode.BICYCLE, "Surco", -12.1350, -77.0150, "San Borja Norte", -12.0910, -77.0020, 7.8, 26);
+            recordDemoTrip(lucia.getId(), TransportMode.BICYCLE, "Barranco", -12.1480, -77.0210, "San Isidro Golf", -12.0950, -77.0420, 8.0, 28);
+            recordDemoTrip(diego.getId(), TransportMode.WALKING, "Av. Brasil", -12.0750, -77.0510, "Plaza Bolognesi", -12.0620, -77.0410, 15.0, 10);
         }
+    }
+
+    private void recordDemoTrip(String userId, TransportMode mode, String origin, double oLat, double oLng,
+                                String dest, double dLat, double dLng, double dist, int duration) {
+        Trip trip = new Trip();
+        trip.setTransportMode(mode);
+        trip.setOriginName(origin);
+        trip.setOriginLat(oLat);
+        trip.setOriginLng(oLng);
+        trip.setDestinationName(dest);
+        trip.setDestinationLat(dLat);
+        trip.setDestinationLng(dLng);
+        trip.setDistanceKm(dist);
+        trip.setDurationMinutes(duration);
+        gamificationService.recordTrip(userId, trip);
     }
 
     private User createUser(String email, String password, String name, Role role, String seed, boolean hasBike) {

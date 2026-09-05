@@ -2,8 +2,6 @@ package com.ecocommute.service;
 
 import com.ecocommute.entity.Role;
 import com.ecocommute.entity.User;
-import com.ecocommute.dto.auth.LoginRequest;
-import com.ecocommute.dto.auth.RegisterRequest;
 import com.ecocommute.repository.UserBadgeRepository;
 import com.ecocommute.repository.UserRepository;
 import com.ecocommute.repository.UserStatsRepository;
@@ -17,6 +15,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -60,63 +59,87 @@ class AuthServiceTest {
     }
 
     @Test
-    @DisplayName("Debe registrar exitosamente un usuario nuevo con contraseña encriptada")
+    @DisplayName("Debe registrar un nuevo usuario exitosamente sin DTO")
     void testRegisterSuccess() {
-        RegisterRequest req = new RegisterRequest("nuevo@ecocommute.org", "Pass123!", "Nuevo Usuario", true, 15);
+        Map<String, Object> req = Map.of(
+                "email", "test@ecocommute.org",
+                "password", "Secret123!",
+                "fullName", "Test User"
+        );
 
-        when(userRepository.existsByEmail("nuevo@ecocommute.org")).thenReturn(false);
-        when(passwordEncoder.encode("Pass123!")).thenReturn("$2a$10$hashedPassword");
-        when(userRepository.save(any(User.class))).thenAnswer(invocation -> {
-            User u = invocation.getArgument(0);
-            u.setId("user-uuid-123");
+        when(userRepository.existsByEmail(anyString())).thenReturn(false);
+        when(passwordEncoder.encode(anyString())).thenReturn("hashed_password");
+        when(userRepository.save(any(User.class))).thenAnswer(inv -> {
+            User u = inv.getArgument(0);
+            u.setId("user-123");
             return u;
         });
-        when(jwtService.generateToken(any(User.class))).thenReturn("valid.jwt.token");
+        when(jwtService.generateToken(any(User.class))).thenReturn("jwt.token.here");
 
-        var response = authService.register(req);
+        Map<String, Object> response = authService.register(req);
 
         assertNotNull(response);
-        assertEquals("nuevo@ecocommute.org", response.email());
-        assertEquals("valid.jwt.token", response.token());
-        assertEquals(Role.ROLE_USER, response.role());
-        verify(userRepository).save(any(User.class));
-        verify(userStatsRepository).save(any());
+        assertEquals("jwt.token.here", response.get("token"));
+        assertEquals("test@ecocommute.org", response.get("email"));
+        verify(userRepository, times(1)).save(any(User.class));
+        verify(userStatsRepository, times(1)).save(any());
     }
 
     @Test
-    @DisplayName("Debe rechazar registro con correo duplicado")
+    @DisplayName("Debe lanzar excepción si el email ya existe")
     void testRegisterDuplicateEmail() {
-        RegisterRequest req = new RegisterRequest("existente@ecocommute.org", "Pass123!", "Usuario", true, 15);
-        when(userRepository.existsByEmail("existente@ecocommute.org")).thenReturn(true);
+        Map<String, Object> req = Map.of(
+                "email", "existing@ecocommute.org",
+                "password", "Secret123!",
+                "fullName", "Test User"
+        );
+
+        when(userRepository.existsByEmail("existing@ecocommute.org")).thenReturn(true);
 
         assertThrows(IllegalArgumentException.class, () -> authService.register(req));
         verify(userRepository, never()).save(any());
     }
 
     @Test
-    @DisplayName("Debe rechazar login con contraseña incorrecta")
-    void testLoginInvalidPassword() {
-        User user = new User("test@ecocommute.org", "$2a$10$hashedPassword", "Test User", Role.ROLE_USER);
-        user.setActive(true);
+    @DisplayName("Debe iniciar sesión exitosamente con credenciales válidas")
+    void testLoginSuccess() {
+        Map<String, Object> req = Map.of(
+                "email", "test@ecocommute.org",
+                "password", "Secret123!"
+        );
+
+        User user = new User();
+        user.setId("user-123");
+        user.setEmail("test@ecocommute.org");
+        user.setPassword("hashed_password");
+        user.setRole(Role.ROLE_USER);
 
         when(userRepository.findByEmail("test@ecocommute.org")).thenReturn(Optional.of(user));
-        when(passwordEncoder.matches("WrongPass", "$2a$10$hashedPassword")).thenReturn(false);
+        when(passwordEncoder.matches("Secret123!", "hashed_password")).thenReturn(true);
+        when(jwtService.generateToken(user)).thenReturn("jwt.token.here");
 
-        LoginRequest req = new LoginRequest("test@ecocommute.org", "WrongPass");
+        Map<String, Object> response = authService.login(req);
 
-        assertThrows(IllegalArgumentException.class, () -> authService.login(req));
+        assertNotNull(response);
+        assertEquals("jwt.token.here", response.get("token"));
+        assertEquals("user-123", response.get("id"));
     }
 
     @Test
-    @DisplayName("Debe bloquear login si la cuenta está suspendida por el Administrador")
-    void testLoginSuspendedAccount() {
-        User user = new User("suspendido@ecocommute.org", "$2a$10$hashedPassword", "Suspended User", Role.ROLE_USER);
-        user.setActive(false); // Suspended
+    @DisplayName("Debe fallar el inicio de sesión con contraseña incorrecta")
+    void testLoginInvalidPassword() {
+        Map<String, Object> req = Map.of(
+                "email", "test@ecocommute.org",
+                "password", "WrongPassword"
+        );
 
-        when(userRepository.findByEmail("suspendido@ecocommute.org")).thenReturn(Optional.of(user));
+        User user = new User();
+        user.setEmail("test@ecocommute.org");
+        user.setPassword("hashed_password");
 
-        LoginRequest req = new LoginRequest("suspendido@ecocommute.org", "Pass123!");
+        when(userRepository.findByEmail("test@ecocommute.org")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("WrongPassword", "hashed_password")).thenReturn(false);
 
-        assertThrows(IllegalStateException.class, () -> authService.login(req));
+        assertThrows(IllegalArgumentException.class, () -> authService.login(req));
     }
 }

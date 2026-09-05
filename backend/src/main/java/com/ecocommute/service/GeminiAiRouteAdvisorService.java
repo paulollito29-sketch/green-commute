@@ -1,8 +1,6 @@
 package com.ecocommute.service;
 
 import com.ecocommute.entity.TransportMode;
-import com.ecocommute.dto.route.AiInsightDTO;
-import com.ecocommute.dto.route.CoordinatesDTO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -11,6 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
 import java.time.LocalTime;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -28,13 +27,13 @@ public class GeminiAiRouteAdvisorService {
         this.restClient = RestClient.builder().build();
     }
 
-    public AiInsightDTO generateRouteInsight(CoordinatesDTO origin,
-                                            CoordinatesDTO destination,
-                                            TransportMode selectedMode,
-                                            double distanceKm,
-                                            double co2SavedGrams,
-                                            int durationMinutes,
-                                            boolean userHasBicycle) {
+    public Map<String, Object> generateRouteInsight(double originLat, double originLng,
+                                                    double destLat, double destLng,
+                                                    TransportMode selectedMode,
+                                                    double distanceKm,
+                                                    double co2SavedGrams,
+                                                    int durationMinutes,
+                                                    boolean userHasBicycle) {
 
         int currentHour = LocalTime.now().getHour();
         boolean isRushHour = (currentHour >= 7 && currentHour <= 9) || (currentHour >= 17 && currentHour <= 20);
@@ -61,7 +60,7 @@ public class GeminiAiRouteAdvisorService {
                         )
                 );
 
-                Map<?, ?> response = restClient.post()
+                Map response = restClient.post()
                         .uri(apiUrl)
                         .contentType(MediaType.APPLICATION_JSON)
                         .body(requestBody)
@@ -69,61 +68,48 @@ public class GeminiAiRouteAdvisorService {
                         .body(Map.class);
 
                 if (response != null && response.containsKey("candidates")) {
-                    List<?> candidates = (List<?>) response.get("candidates");
+                    List candidates = (List) response.get("candidates");
                     if (!candidates.isEmpty()) {
-                        Map<?, ?> first = (Map<?, ?>) candidates.get(0);
-                        Map<?, ?> content = (Map<?, ?>) first.get("content");
-                        List<?> parts = (List<?>) content.get("parts");
-                        Map<?, ?> firstPart = (Map<?, ?>) parts.get(0);
-                        String text = (String) firstPart.get("text");
+                        Map first = (Map) candidates.get(0);
+                        Map content = (Map) first.get("content");
+                        List parts = (List) content.get("parts");
+                        Map textPart = (Map) parts.get(0);
+                        String geminiText = (String) textPart.get("text");
 
-                        return new AiInsightDTO(
-                                "🌿 Corredor Verde Optimizado por Gemini AI",
-                                text.trim(),
-                                "🏅 Insignia: Ruta Verde Inteligente",
-                                calories,
-                                Math.round(treesSavedFraction * 1000.0) / 1000.0,
-                                weatherContext
-                        );
+                        Map<String, Object> insight = new HashMap<>();
+                        insight.put("ecoReasoning", geminiText.trim());
+                        insight.put("greenScore", 96);
+                        insight.put("safetyRating", 92);
+                        insight.put("shadeTreeCoveragePercent", 68.0);
+                        insight.put("cyclingInfrastructureQuality", "Excelente (Ciclovías segregadas)");
+                        insight.put("healthBenefitSummary", String.format("Aproximadamente %d kcal quemadas", calories));
+                        return insight;
                     }
                 }
             } catch (Exception e) {
-                log.warn("Gemini API call failed, using rule-based AI advisor: {}", e.getMessage());
+                log.warn("Gemini API call failed, using heuristic advisor: {}", e.getMessage());
             }
         }
 
-        // Rule-based high performance AI corridor generator for selected mode
-        String title;
-        String explanation;
-        String badgeRec;
+        // Heuristic fallback
+        String fallbackTitle = switch (selectedMode) {
+            case BICYCLE -> "✨ Corredor Verde Optimizado con IA";
+            case WALKING -> "🌿 Senda Peatonal Saludable";
+            default -> "🚗 Ruta con Menor Tráfico y Emisiones";
+        };
 
-        if (selectedMode == TransportMode.BICYCLE) {
-            title = "🌿 Corredor Verde de Ciclovías Seguras";
-            explanation = String.format(
-                    "Trazado optimizado por vías arboladas con 40%% menos exposición a tráfico y pendientes suaves. Quemas %d kcal y ahorras %.0f g de CO₂.",
-                    calories, co2SavedGrams
-            );
-            badgeRec = "🏅 Insignia: Ciclista de Corredor Verde";
-        } else if (selectedMode == TransportMode.WALKING) {
-            title = "🚶 Paseo Peatonal Ecológico y Arbolado";
-            explanation = String.format(
-                    "Ruta peatonal por parques y aceras anchas alejadas de avenidas congestionadas. Consumirás %d calorías con cero emisiones directas.",
-                    calories
-            );
-            badgeRec = "🏅 Insignia: Caminante Sostenible";
-        } else {
-            title = "🚗 Ruta Vehicular Eco-Drive de Flujo Continuo";
-            explanation = "Trazado optimizado respetando el estricto sentido de calles con menor número de semáforos y paradas bruscas para reducir el consumo de combustible.";
-            badgeRec = "🏅 Insignia: Conductor Eco-Eficiente";
-        }
-
-        return new AiInsightDTO(
-                title,
-                explanation,
-                badgeRec,
-                calories,
-                Math.round(treesSavedFraction * 1000.0) / 1000.0,
-                weatherContext
+        String fallbackExplanation = String.format(
+                "Ruta adaptada por calles arboladas, ciclovías y vías con menor exposición a smog (%s). Permite un ahorro de %.2f kg de CO₂ frente a un auto convencional.",
+                weatherContext, (co2SavedGrams / 1000.0)
         );
+
+        Map<String, Object> insight = new HashMap<>();
+        insight.put("ecoReasoning", fallbackTitle + "\n" + fallbackExplanation);
+        insight.put("greenScore", selectedMode == TransportMode.BICYCLE || selectedMode == TransportMode.WALKING ? 95 : 65);
+        insight.put("safetyRating", selectedMode == TransportMode.BICYCLE ? 90 : 85);
+        insight.put("shadeTreeCoveragePercent", 65.0);
+        insight.put("cyclingInfrastructureQuality", selectedMode == TransportMode.BICYCLE ? "Óptima con ciclovías" : "N/A");
+        insight.put("healthBenefitSummary", String.format("%d kcal quemadas", calories));
+        return insight;
     }
 }

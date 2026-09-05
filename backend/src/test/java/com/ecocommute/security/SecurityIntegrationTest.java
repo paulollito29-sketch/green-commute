@@ -35,7 +35,7 @@ class SecurityIntegrationTest {
 
         mockMvc.perform(get("/api/v1/dashboard/community-impact"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.totalCo2SavedTons").exists());
+                .andExpect(jsonPath("$.totalCo2SavedKg").exists());
     }
 
     @Test
@@ -65,7 +65,7 @@ class SecurityIntegrationTest {
         mockMvc.perform(get("/api/v1/admin/dashboard/kpis")
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.totalRegisteredUsers").exists());
+                .andExpect(jsonPath("$.totalUsers").exists());
     }
 
     @Test
