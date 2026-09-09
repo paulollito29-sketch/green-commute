@@ -483,16 +483,21 @@ class EcoCommuteApp {
   }
 
   renderRouteComparison(routeResponse, hasAiInsight = false) {
-    this.currentRoutes = routeResponse.allOptions;
+    this.currentRoutes = [
+      routeResponse.aiGreenCorridorRoute,
+      routeResponse.standardProfileRoute,
+      routeResponse.baselineCarRoute
+    ].filter(Boolean);
     const container = document.getElementById('routeCardsContainer');
     container.innerHTML = '';
 
     const summaryText = document.getElementById('routeSummaryText');
-    summaryText.innerText = `Línea Base en Auto: ${(routeResponse.baselineCo2Grams / 1000).toFixed(2)} kg CO₂`;
+    const baselineCo2 = routeResponse.baselineCarRoute?.co2EmittedGrams ?? 0;
+    summaryText.innerText = `Línea Base en Auto: ${(baselineCo2 / 1000).toFixed(2)} kg CO₂`;
 
-    const baseline = routeResponse.baselineRoute;
-    const sustainable = routeResponse.sustainableRoute;
-    const aiRoute = routeResponse.aiSmartRoute;
+    const baseline = routeResponse.baselineCarRoute;
+    const sustainable = routeResponse.standardProfileRoute;
+    const aiRoute = routeResponse.aiGreenCorridorRoute;
 
     const cardsToRender = [];
 
@@ -531,11 +536,11 @@ class EcoCommuteApp {
       const aiInsightHtml = r.aiInsight ? `
         <div class="mt-2 pt-2 border-t border-slate-800/80 bg-emerald-950/20 -mx-3 -mb-3 p-2.5 rounded-b-xl">
           <div class="text-[11px] font-bold text-emerald-300 flex items-center gap-1">
-            <span>✨</span> ${r.aiInsight.title}
+            <span>✨</span> Análisis del Corredor Verde
           </div>
-          <p class="text-[10px] text-slate-300 mt-0.5 leading-relaxed">${r.aiInsight.explanation}</p>
+          <p class="text-[10px] text-slate-300 mt-0.5 leading-relaxed">${r.aiInsight.ecoReasoning}</p>
           <div class="flex items-center justify-between text-[10px] text-emerald-400 font-semibold mt-1">
-            <span>🔥 ${r.aiInsight.caloriesEstimated} kcal</span>
+            <span>🔥 ${r.aiInsight.healthBenefitSummary}</span>
             <span>🌳 ~${r.aiInsight.treesEquivalentFraction} árboles eq.</span>
           </div>
         </div>
@@ -988,8 +993,8 @@ class EcoCommuteApp {
             </div>
           </div>
           <div class="text-right">
-            <div class="text-xs font-black text-brand-300">${u.points} pts</div>
-            <div class="text-[10px] text-emerald-400 font-semibold">${u.co2SavedKg} kg CO₂</div>
+            <div class="text-xs font-black text-brand-300">${u.currentPoints} pts</div>
+            <div class="text-[10px] text-emerald-400 font-semibold">${u.totalCo2SavedKg.toFixed(2)} kg CO₂</div>
           </div>
         `;
         list.appendChild(row);
