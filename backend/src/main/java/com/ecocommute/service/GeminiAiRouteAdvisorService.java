@@ -83,6 +83,7 @@ public class GeminiAiRouteAdvisorService {
                         insight.put("shadeTreeCoveragePercent", 68.0);
                         insight.put("cyclingInfrastructureQuality", "Excelente (Ciclovías segregadas)");
                         insight.put("healthBenefitSummary", String.format("Aproximadamente %d kcal quemadas", calories));
+                        insight.put("treesEquivalentFraction", treesSavedFraction);
                         return insight;
                     }
                 }
@@ -110,6 +111,7 @@ public class GeminiAiRouteAdvisorService {
         insight.put("shadeTreeCoveragePercent", 65.0);
         insight.put("cyclingInfrastructureQuality", selectedMode == TransportMode.BICYCLE ? "Óptima con ciclovías" : "N/A");
         insight.put("healthBenefitSummary", String.format("%d kcal quemadas", calories));
+        insight.put("treesEquivalentFraction", treesSavedFraction);
         return insight;
     }
 }

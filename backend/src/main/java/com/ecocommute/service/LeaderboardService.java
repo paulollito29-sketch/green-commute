@@ -32,6 +32,8 @@ public class LeaderboardService {
             entry.put("avatarUrl", s.getUser().getAvatarUrl());
             entry.put("totalCo2SavedKg", s.getTotalCo2SavedKg());
             entry.put("currentPoints", s.getUser().getCurrentPoints());
+            entry.put("tripsCount", s.getTotalTrips());
+            entry.put("streakDays", s.getUser().getStreakDays());
             entry.put("rank", rank++);
             result.add(entry);
         }
