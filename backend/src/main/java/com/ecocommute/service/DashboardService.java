@@ -64,16 +64,41 @@ public class DashboardService {
                 .map(d -> d.getDayOfWeek().getDisplayName(TextStyle.SHORT, new Locale("es", "ES")))
                 .toList();
 
+        // Weekly trend combined into the shape the dashboard UI expects:
+        // [{ dayOfWeek: "lun.", co2SavedGrams: 123.0 }, ...]
+        List<Map<String, Object>> weeklyTrend = new ArrayList<>();
+        for (int i = 0; i < weeklyLabels.size(); i++) {
+            Map<String, Object> day = new HashMap<>();
+            day.put("dayOfWeek", weeklyLabels.get(i));
+            day.put("co2SavedGrams", weeklyCo2SavedGrams.get(i));
+            weeklyTrend.add(day);
+        }
+
         // Trips count by mode
         List<Trip> allUserTrips = tripRepository.findByUserIdOrderByCompletedAtDesc(userId);
         Map<String, Long> tripsByMode = allUserTrips.stream()
                 .collect(Collectors.groupingBy(t -> t.getTransportMode().name(), Collectors.counting()));
 
-        // Badges
-        List<Badge> unlockedBadges = userBadgeRepository.findByUserId(userId).stream()
-                .map(ub -> ub.getBadge())
+        // Badges: every badge, marked as unlocked/locked with progress toward the next one
+        Set<Long> unlockedBadgeIds = userBadgeRepository.findByUserId(userId).stream()
+                .map(ub -> ub.getBadge().getId())
+                .collect(Collectors.toSet());
+        List<Badge> allBadgeEntities = badgeRepository.findAll();
+
+        List<Map<String, Object>> recentBadges = allBadgeEntities.stream()
+                .map(badge -> {
+                    boolean unlocked = unlockedBadgeIds.contains(badge.getId());
+                    Map<String, Object> b = new HashMap<>();
+                    b.put("id", badge.getId());
+                    b.put("code", badge.getCode());
+                    b.put("title", badge.getTitle());
+                    b.put("description", badge.getDescription());
+                    b.put("iconEmoji", badge.getIconEmoji());
+                    b.put("unlocked", unlocked);
+                    b.put("progressPercent", unlocked ? 100 : calculateBadgeProgress(badge, user, stats));
+                    return b;
+                })
                 .toList();
-        List<Badge> allBadges = badgeRepository.findAll();
 
         Map<String, Object> dashboard = new HashMap<>();
         dashboard.put("userId", user.getId());
@@ -84,29 +109,47 @@ public class DashboardService {
         dashboard.put("totalDistanceKm", stats.getTotalDistanceKm());
         dashboard.put("totalTrips", stats.getTotalTrips());
         dashboard.put("currentPoints", user.getCurrentPoints());
-        dashboard.put("totalCalories", stats.getTotalCaloriesBurned());
-        dashboard.put("treesPlantedEquivalent", stats.getTreesEquivalent());
-        dashboard.put("weeklyCo2SavedGrams", weeklyCo2SavedGrams);
-        dashboard.put("weeklyLabels", weeklyLabels);
+        dashboard.put("currentLevel", user.getCurrentLevel());
+        dashboard.put("totalCaloriesBurned", stats.getTotalCaloriesBurned());
+        dashboard.put("treesEquivalent", stats.getTreesEquivalent());
+        dashboard.put("weeklyTrend", weeklyTrend);
         dashboard.put("tripsByMode", tripsByMode);
-        dashboard.put("unlockedBadges", unlockedBadges);
-        dashboard.put("allBadges", allBadges);
+        dashboard.put("recentBadges", recentBadges);
         return dashboard;
+    }
+
+    private int calculateBadgeProgress(Badge badge, User user, UserStats stats) {
+        List<Double> ratios = new ArrayList<>();
+        if (badge.getRequiredPoints() > 0) {
+            ratios.add(user.getCurrentPoints() / (double) badge.getRequiredPoints());
+        }
+        if (badge.getRequiredCo2SavedKg() > 0) {
+            ratios.add(stats.getTotalCo2SavedKg() / badge.getRequiredCo2SavedKg());
+        }
+        if (badge.getRequiredStreakDays() > 0) {
+            ratios.add(user.getStreakDays() / (double) badge.getRequiredStreakDays());
+        }
+        if (badge.getRequiredTrips() > 0) {
+            ratios.add(stats.getTotalTrips() / (double) badge.getRequiredTrips());
+        }
+        if (ratios.isEmpty()) return 0;
+        double minRatio = ratios.stream().mapToDouble(Double::doubleValue).min().orElse(0.0);
+        return (int) Math.round(Math.min(1.0, Math.max(0.0, minRatio)) * 100);
     }
 
     @Transactional(readOnly = true)
     public Map<String, Object> getCommunityImpact() {
-        double totalCo2 = userStatsRepository.sumTotalCo2SavedKg();
+        double totalCo2Kg = userStatsRepository.sumTotalCo2SavedKg();
         double totalKm = userStatsRepository.sumTotalDistanceKm();
         long totalTrips = userStatsRepository.sumTotalTrips();
         long activeUsers = userRepository.count();
 
         Map<String, Object> impact = new HashMap<>();
-        impact.put("totalCo2SavedKg", totalCo2);
-        impact.put("totalDistanceKm", totalKm);
+        impact.put("totalCo2SavedTons", totalCo2Kg / 1000.0);
+        impact.put("totalCleanKm", totalKm);
         impact.put("totalTrips", totalTrips);
         impact.put("totalActiveUsers", activeUsers);
-        impact.put("treesPlantedEquivalent", totalCo2 / 21.77);
+        impact.put("totalTreesEquivalent", totalCo2Kg / 21.77);
         return impact;
     }
 }

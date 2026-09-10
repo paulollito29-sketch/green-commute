@@ -955,9 +955,9 @@ class EcoCommuteApp {
   async loadCommunityImpact() {
     try {
       const impact = await window.api.getCommunityImpact();
-      document.getElementById('commTotalTons').innerText = impact.totalCo2SavedTons.toFixed(2);
-      document.getElementById('commTotalTrees').innerText = Math.round(impact.totalTreesEquivalent);
-      document.getElementById('commTotalKm').innerText = Math.round(impact.totalCleanKm);
+      document.getElementById('commTotalCo2').innerText = `${impact.totalCo2SavedTons.toFixed(2)} t`;
+      document.getElementById('commTotalTrees').innerText = Math.round(impact.treesPlantedEquivalent);
+      document.getElementById('commTotalKm').innerText = Math.round(impact.totalDistanceKm);
     } catch (_) {}
   }
 
