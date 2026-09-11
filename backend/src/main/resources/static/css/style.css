@@ -196,14 +196,13 @@ html, body {
 }
 
 /* Mobile Bottom Sheet Responsive Modes */
-@media (max-width: 767px) {
+@media (min-width: 768px) {
   #mainSidebar {
-    transition: max-height 0.35s cubic-bezier(0.32, 0.72, 0, 1), transform 0.35s ease;
+    transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.3s ease;
   }
-  #mainSidebar.sheet-collapsed {
-    max-height: 180px;
-  }
-  #mainSidebar.sheet-expanded {
-    max-height: 82vh;
+  #mainSidebar.panel-collapsed {
+    transform: translateX(-120%);
+    opacity: 0;
+    pointer-events: none;
   }
 }
