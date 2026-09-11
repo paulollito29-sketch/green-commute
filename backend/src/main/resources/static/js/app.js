@@ -108,6 +108,28 @@ class EcoCommuteApp {
       sidebar.classList.remove('sheet-collapsed');
       sidebar.classList.add('sheet-expanded');
     });
+
+    this.setupDesktopSidebarCollapse(sidebar);
+  }
+
+  // Lets the user hide the left panel on desktop to see more of the map,
+  // and bring it back with a floating button. Remembers the choice.
+  setupDesktopSidebarCollapse(sidebar) {
+    const btnCollapse = document.getElementById('btnCollapseSidebarDesktop');
+    const btnExpand = document.getElementById('btnExpandSidebarDesktop');
+    if (!btnCollapse || !btnExpand) return;
+
+    const setCollapsed = (collapsed) => {
+      sidebar.classList.toggle('panel-collapsed', collapsed);
+      btnExpand.classList.toggle('hidden', !collapsed);
+      btnExpand.classList.toggle('flex', collapsed);
+      localStorage.setItem('ecocommute_sidebar_collapsed', collapsed ? '1' : '0');
+    };
+
+    btnCollapse.addEventListener('click', () => setCollapsed(true));
+    btnExpand.addEventListener('click', () => setCollapsed(false));
+
+    setCollapsed(localStorage.getItem('ecocommute_sidebar_collapsed') === '1');
   }
 
   switchView(viewId) {
@@ -372,10 +394,20 @@ class EcoCommuteApp {
         this.updateUserUI(profile);
       } catch (_) {
         this.updateUserUI(null);
+        this.openAuthModal();
       }
     } else {
       this.updateUserUI(null);
+      this.openAuthModal();
     }
+  }
+
+  // Shows the login modal automatically when there's no active session
+  // (no saved token, or a saved token that turned out to be invalid/expired).
+  // A user who already logged in and kept their session open (valid token
+  // in localStorage) skips this and goes straight into the app.
+  openAuthModal() {
+    document.getElementById('authModal')?.classList.remove('hidden');
   }
 
   handleAuthSuccess(authResponse) {

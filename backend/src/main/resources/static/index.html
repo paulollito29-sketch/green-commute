@@ -162,11 +162,17 @@
 
   <!-- 3. MOBILE-FIRST BOTTOM SHEET & FLOATING DRAWER -->
   <aside id="mainSidebar" class="fixed bottom-0 left-0 right-0 z-30 md:bottom-6 md:left-6 md:right-auto md:w-[420px] md:max-h-[calc(100vh-100px)] md:top-20 bg-[#090d1a]/95 backdrop-blur-2xl rounded-t-3xl md:rounded-3xl border-t md:border border-white/10 shadow-2xl flex flex-col transition-all duration-300 overflow-hidden max-h-[82vh]">
-    
+
     <!-- Mobile Bottom Sheet Pull Handle -->
     <div id="bottomSheetHandle" class="w-full flex items-center justify-center pt-2 pb-1 cursor-pointer md:hidden shrink-0 hover:bg-white/5 transition" title="Deslizar o tocar para expandir">
       <div class="w-10 h-1 rounded-full bg-slate-500/60"></div>
     </div>
+
+    <!-- Desktop Collapse Toggle (tab attached to the panel's edge) -->
+    <button id="btnCollapseSidebarDesktop" class="hidden md:flex w-full items-center justify-center space-x-1.5 py-1.5 shrink-0 bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white text-[10px] font-bold uppercase tracking-wide border-b border-white/10 transition" title="Minimizar panel">
+      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"></path></svg>
+      <span>Minimizar Panel</span>
+    </button>
 
     <!-- NAVIGATION TABS -->
     <nav class="flex items-center justify-around border-b border-white/5 px-2 py-1 bg-slate-950/40 shrink-0">
@@ -460,6 +466,10 @@
 
   </aside>
 
+  <button id="btnExpandSidebarDesktop" class="hidden fixed left-6 top-24 z-30 items-center space-x-1.5 px-3.5 py-2.5 rounded-2xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold border border-white/10 shadow-2xl transition animate-glow">
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+    <span>Mostrar Panel</span>
+  </button>
   <!-- AUTH MODAL -->
   <div id="authModal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
     <div class="bg-slate-900 border border-white/10 rounded-3xl p-6 max-w-sm w-full shadow-2xl space-y-4 relative">
